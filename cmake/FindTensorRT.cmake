@@ -44,6 +44,12 @@ if(NOT TensorRT_LIBRARY)
     endforeach()
 endif()
 
+if(NOT TensorRT_PLUGIN_LIBRARY)
+    foreach(search ${_TensorRT_SEARCHES})
+        find_library(TensorRT_PLUGIN_LIBRARY NAMES nvinfer_plugin ${${search}} PATH_SUFFIXES lib)
+    endforeach()
+endif()
+
 if(NOT TensorRT_PARSERS_LIBRARY)
     foreach(search ${_TensorRT_SEARCHES})
         find_library(TensorRT_NVPARSERS_LIBRARY NAMES nvparsers ${${search}} PATH_SUFFIXES lib)
@@ -76,7 +82,7 @@ if(TensorRT_FOUND)
     set(TensorRT_INCLUDE_DIRS ${TensorRT_INCLUDE_DIR})
 
     if(NOT TensorRT_LIBRARIES)
-        set(TensorRT_LIBRARIES ${TensorRT_LIBRARY} ${TensorRT_NVONNXPARSER_LIBRARY} ${TensorRT_NVPARSERS_LIBRARY})
+        set(TensorRT_LIBRARIES ${TensorRT_LIBRARY} ${TensorRT_NVONNXPARSER_LIBRARY} ${TensorRT_NVPARSERS_LIBRARY} ${TensorRT_PLUGIN_LIBRARY})
     endif()
 
     if(NOT TARGET TensorRT::TensorRT)

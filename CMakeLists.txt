@@ -28,11 +28,16 @@ IF (NOT TensorRT_DIR)
     set(TensorRT_DIR /home/cyrus/work/libs/TensorRT-8.6.1.6/)
 ENDIF()
 # Use the correct version of CUDA
-MESSAGE(STATUS "PROJECT_NAME: ${PROJECT_NAME}")
-
 IF(UNIX)
 	SET(CUDA_TOOLKIT_ROOT_DIR /usr/local/cuda)
 ENDIF()
+
+#add ort
+add_library(libonnxruntime SHARED IMPORTED GLOBAL)
+set_target_properties(libonnxruntime PROPERTIES IMPORTED_IMPLIB "${3rdlib_DIR}/onnxruntime/lib/onnxruntime.lib" 
+									    IMPORTED_LOCATION "${3rdlib_DIR}/onnxruntime/lib/onnxruntime.dll"
+										INTERFACE_COMPILE_DEFINITIONS  "ORT_DLL_IMPORT;USE_ORT;USE_CUDA"
+										INTERFACE_INCLUDE_DIRECTORIES "${3rdlib_DIR}/onnxruntime/include")
 
 # We require CUDA, OpenCV, and TensorRT
 FIND_PACKAGE(TensorRT REQUIRED)
@@ -46,6 +51,15 @@ MESSAGE(STATUS "SRC_LIST: ${SRC_LIST}")
 
 ADD_EXECUTABLE(${PROJECT_NAME} ${SRC_LIST})
 
-TARGET_LINK_LIBRARIES(${PROJECT_NAME}  ${OpenCV_LIBS} ${CUDA_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${TensorRT_LIBRARIES})
+TARGET_LINK_LIBRARIES(${PROJECT_NAME} libonnxruntime ${OpenCV_LIBS} ${CUDA_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT} ${TensorRT_LIBRARIES})
 SET_TARGET_PROPERTIES(${PROJECT_NAME} PROPERTIES DEBUG_POSTFIX ${CMAKE_DEBUG_POSTFIX})
 SET_TARGET_PROPERTIES(${PROJECT_NAME} PROPERTIES CUDA_ARCHITECTURES "52;61;75;86")
+
+IF (MSVC)
+	file(GLOB ORT_DLLS "${3rdlib_DIR}/onnxruntime/lib/*.dll")
+	add_custom_command(TARGET ${PROJECT_NAME}
+						POST_BUILD
+						COMMAND ${CMAKE_COMMAND} -E copy_if_different
+						${ORT_DLLS}
+						$<TARGET_FILE_DIR:${PROJECT_NAME}>)
+ENDIF (MSVC)

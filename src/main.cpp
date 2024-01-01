@@ -4,6 +4,7 @@
 #include "cpm.hpp"
 #include "infer.hpp"
 #include "yolo.hpp"
+#include "yolo_ort.hpp"
 #include <filesystem>
 
 using namespace std;
@@ -39,33 +40,46 @@ static const char* cocolabels[] = { "person",        "bicycle",      "car",
 yolo::Image cvimg(const cv::Mat& image) { return yolo::Image(image.data, image.cols, image.rows); }
 
 void perf() {
-	int max_infer_batch = 16;
-	int batch = 16;
+	int max_infer_batch = 32;
+	int batch = 32;
 	std::vector<cv::Mat> images{ cv::imread("../workspace/inference/car.jpg"), cv::imread("../workspace/inference/gril.jpg"),
 								cv::imread("../workspace/inference/group.jpg") };
 
 	for (int i = images.size(); i < batch; ++i) images.push_back(images[i % 3]);
 
-	cpm::Instance<yolo::BoxArray, yolo::Image, yolo::Infer> cpmi;
-	bool ok = cpmi.start([] { return yolo::load("../workspace/yolov8n.transd.engine", yolo::Type::V8); },
-		max_infer_batch);
+	//cpm::Instance<yolo::BoxArray, yolo::Image, yolo::Infer> cpmi;
+	//std::string engine_file = "../workspace/yolov8x.transd.engine";
+	//bool ok = cpmi.start([engine_file]() { return yolo::load(engine_file, yolo::Type::V7); },
+	//	max_infer_batch);
 
+	cpm::Instance<yolo_ort::BoxArray, cv::Mat, yolo_ort::Infer> cpmi;
+	std::string onnx_file = "../workspace/yolov7.onnx";
+	int device_id = 0, n_thread = 8;
+	bool ok = cpmi.start([onnx_file, device_id,  n_thread ]() { return yolo_ort::load(onnx_file, yolo_ort::Type::V7, device_id, n_thread); },
+		max_infer_batch);
 	if (!ok) return;
 
-	std::vector<yolo::Image> yoloimages(images.size());
-	std::transform(images.begin(), images.end(), yoloimages.begin(), cvimg);
+	//std::vector<yolo::Image> yoloimages(images.size());
+	//std::transform(images.begin(), images.end(), yoloimages.begin(), cvimg);
 
-	trt::Timer timer;
-	for (int i = 0; i < 5; ++i) {
-		timer.start();
-		cpmi.commits(yoloimages).back().get();
-		timer.stop("BATCH16");
+	//trt::Timer timer;				
+	int64 t;
+	for (int i = 0; i < 500; ++i) {
+		//timer.start();
+		t = cv::getTickCount();
+		cpmi.commits(images).back().get();
+		//cpmi.commits(yoloimages).back().get();
+		std::cout << "\t BATCH16 time elapse: " << (double)(cv::getTickCount() - t) / cv::getTickFrequency() * 1000 << "ms." << endl;
+		//timer.stop("BATCH16");
 	}
 
-	for (int i = 0; i < 5; ++i) {
-		timer.start();
-		cpmi.commit(yoloimages[0]).get();
-		timer.stop("BATCH1");
+	for (int i = 0; i < 50; ++i) {
+		//timer.start();
+		t = cv::getTickCount();
+		//cpmi.commit(yoloimages[0]).get();
+		cpmi.commit(images[0]).get();
+		std::cout << "\t BATCH1 time elapse: " << (double)(cv::getTickCount() - t) / cv::getTickFrequency() * 1000 << "ms." << endl;
+		//timer.stop("BATCH1");
 	}
 }
 
@@ -135,7 +149,7 @@ namespace fs = std::filesystem;
 int main() {
 	std::cout << "Current path is " << fs::current_path() << '\n';
 	perf();
-	batch_inference();
-	single_inference();
+	//batch_inference();
+	//single_inference();
 	return 0;
 }
