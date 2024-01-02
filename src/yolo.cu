@@ -1,4 +1,4 @@
-#include "infer.hpp"
+﻿#include "infer.hpp"
 #include "yolo.hpp"
 
 namespace yolo {

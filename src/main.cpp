@@ -40,8 +40,8 @@ static const char* cocolabels[] = { "person",        "bicycle",      "car",
 yolo::Image cvimg(const cv::Mat& image) { return yolo::Image(image.data, image.cols, image.rows); }
 
 void perf() {
-	int max_infer_batch = 32;
-	int batch = 32;
+	int max_infer_batch = 8;
+	int batch = 8;
 	std::vector<cv::Mat> images{ cv::imread("../workspace/inference/car.jpg"), cv::imread("../workspace/inference/gril.jpg"),
 								cv::imread("../workspace/inference/group.jpg") };
 
@@ -55,22 +55,46 @@ void perf() {
 	cpm::Instance<yolo_ort::BoxArray, cv::Mat, yolo_ort::Infer> cpmi;
 	std::string onnx_file = "../workspace/yolov7.onnx";
 	int device_id = 0, n_thread = 8;
-	bool ok = cpmi.start([onnx_file, device_id,  n_thread ]() { return yolo_ort::load(onnx_file, yolo_ort::Type::V7, device_id, n_thread); },
+	bool ok = cpmi.start([onnx_file, device_id, n_thread]() { return yolo_ort::load(onnx_file, yolo_ort::Type::V7, device_id, n_thread); },
 		max_infer_batch);
 	if (!ok) return;
 
 	//std::vector<yolo::Image> yoloimages(images.size());
 	//std::transform(images.begin(), images.end(), yoloimages.begin(), cvimg);
 
-	//trt::Timer timer;				
+	//trt::Timer timer;		
+	std::vector<std::shared_future<yolo_ort::BoxArray>> results;
 	int64 t;
-	for (int i = 0; i < 500; ++i) {
+	for (int i = 0; i < 5000; ++i) {
 		//timer.start();
 		t = cv::getTickCount();
-		cpmi.commits(images).back().get();
+		//cpmi.commits(images).back().get();
+		std::vector<std::shared_future<yolo_ort::BoxArray>> batched_result = cpmi.commits(images);
 		//cpmi.commits(yoloimages).back().get();
 		std::cout << "\t BATCH16 time elapse: " << (double)(cv::getTickCount() - t) / cv::getTickFrequency() * 1000 << "ms." << endl;
+		for (auto result : batched_result) {
+			results.emplace_back(result);
+		}
 		//timer.stop("BATCH16");
+	}
+	for (int ib = 0; ib < (int)results.size(); ++ib) {
+		int idx = ib % batch;
+		auto& objs = results[idx].get();
+		auto image = images[idx];
+		for (auto& obj : objs) {
+			uint8_t b, g, r;
+			tie(b, g, r) = yolo::random_color(obj.class_label);
+			cv::rectangle(image, cv::Point(obj.left, obj.top), cv::Point(obj.right, obj.bottom),
+				cv::Scalar(b, g, r), 5);
+
+			auto name = cocolabels[obj.class_label];
+			auto caption = cv::format("%s %.2f", name, obj.confidence);
+			int width = cv::getTextSize(caption, 0, 1, 2, nullptr).width + 10;
+			cv::rectangle(image, cv::Point(obj.left - 3, obj.top - 33),
+				cv::Point(obj.left + width, obj.top), cv::Scalar(b, g, r), -1);
+			cv::putText(image, caption, cv::Point(obj.left, obj.top - 5), 0, 1, cv::Scalar::all(0), 2,
+				16);
+		}
 	}
 
 	for (int i = 0; i < 50; ++i) {
