@@ -78,7 +78,7 @@ void letter_box(const cv::Mat& image, cv::Size new_shape, cv::Mat& dst, cv::Scal
 	float scale_x = new_shape.width / (float)image.cols;
 	float scale_y = new_shape.height / (float)image.rows;
 	float scale = std::min(scale_x, scale_y);
-	float i2d[6], d2i[6];
+	float i2d[6] = {0};
 
 	// d2i 是为了后续坐标映射回去
 	i2d[0] = scale;  i2d[1] = 0;  i2d[2] = (-scale * image.cols + new_shape.width + scale - 1) * 0.5;
@@ -87,15 +87,15 @@ void letter_box(const cv::Mat& image, cv::Size new_shape, cv::Mat& dst, cv::Scal
 	cv::Mat m2x3_i2d(2, 3, CV_32F, i2d);
 
 	dst = cv::Mat(new_shape.height, new_shape.width, CV_8UC3);
-	cv::warpAffine(image, dst, m2x3_i2d, dst.size(), cv::INTER_LINEAR,
-		cv::BORDER_CONSTANT, color);
+	cv::warpAffine(image, dst, m2x3_i2d, dst.size(), cv::INTER_LINEAR, cv::BORDER_CONSTANT, color);
 }
 
 void perf() {
 	int max_infer_batch = 8;
 	int batch = 8;
 	std::vector<cv::Mat> images{ cv::imread("../workspace/inference/car.jpg"), cv::imread("../workspace/inference/gril.jpg"),
-								cv::imread("../workspace/inference/group.jpg") };
+								cv::imread("../workspace/inference/group.jpg"), cv::imread("../workspace/inference/yq.jpg"),
+								cv::imread("../workspace/inference/zand.jpg"), cv::imread("../workspace/inference/zgjr.jpg") };
 
 	for (int i = images.size(); i < batch; ++i) images.push_back(images[i % 3]);
 	int64 t;
@@ -117,8 +117,8 @@ void perf() {
 	//cv::waitKey(0);
 
 	cpm::Instance<yolo::BoxArray, yolo::Image, yolo::Infer> cpmi;
-	std::string engine_file = "../workspace/yolov8x.transd.engine"; //../workspace/yolov8n.transd.engine ;"../workspace/yolov7.engine";  //
-	bool ok = cpmi.start([engine_file]() { return yolo::load(engine_file, yolo::Type::V7); },
+	std::string engine_file = "../workspace/yolov8x.transd.engine";//../workspace/yolov8n.transd.engine ; // "../workspace/yolov7.engine"; 
+	bool ok = cpmi.start([engine_file]() { return yolo::load(engine_file, yolo::Type::V8, 0.5f, 0.5f); },
 		max_infer_batch);
 
 	//cpm::Instance<yolo_ort::BoxArray, cv::Mat, yolo_ort::Infer> cpmi;
@@ -146,10 +146,10 @@ void perf() {
 		auto batched_result = cpmi.commits(yoloimages);
 		auto last_result = batched_result.back().get();
 		std::cout << "\t BATCH16 time elapse: " << (double)(cv::getTickCount() - t) / cv::getTickFrequency() * 1000 << "ms." << endl;
-		for (auto result : batched_result) {
+		//timer.stop("BATCH16");
+		for (auto& result : batched_result) {
 			results.emplace_back(result);
 		}
-		//timer.stop("BATCH16");
 	}
 
 	for (int ib = 0; ib < (int)results.size(); ++ib) {
@@ -185,7 +185,7 @@ void perf() {
 void batch_inference() {
 	std::vector<cv::Mat> images{ cv::imread("../workspace/inference/car.jpg"), cv::imread("../workspace/inference/gril.jpg"),
 								cv::imread("../workspace/inference/group.jpg") };
-	auto yolo = yolo::load("../workspace/yolov8n.transd.engine", yolo::Type::V8);
+	auto yolo = yolo::load("../workspace/yolov8x.transd.engine", yolo::Type::V8);
 	if (yolo == nullptr) return;
 
 	std::vector<yolo::Image> yoloimages(images.size());
@@ -248,7 +248,7 @@ namespace fs = std::filesystem;
 int main() {
 	std::cout << "Current path is " << fs::current_path() << '\n';
 	perf();
-	//batch_inference();
+	batch_inference();
 	//single_inference();
 	return 0;
 }
