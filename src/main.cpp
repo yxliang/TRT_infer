@@ -37,6 +37,8 @@ static const char* cocolabels[] = { "person",        "bicycle",      "car",
 								   "vase",          "scissors",     "teddy bear",
 								   "hair drier",    "toothbrush" };
 
+static const char* blood_dna_labels[] = { "negative", "lymphocyte", "Aneuploid" };
+
 yolo::Image cvimg(const cv::Mat& image) { return yolo::Image(image.data, image.cols, image.rows); }
 
 void letter_box(const cv::Mat& img, cv::Size new_shape, cv::Mat& dst, float& r, cv::Point& d, cv::Scalar color = cv::Scalar(114, 114, 114),
@@ -78,9 +80,9 @@ void letter_box(const cv::Mat& image, cv::Size new_shape, cv::Mat& dst, cv::Scal
 	float scale_x = new_shape.width / (float)image.cols;
 	float scale_y = new_shape.height / (float)image.rows;
 	float scale = std::min(scale_x, scale_y);
-	float i2d[6] = {0};
+	float i2d[6] = { 0 };
 
-	// d2i ÊÇÎªÁËºóÐø×ø±êÓ³Éä»ØÈ¥
+	// d2i ï¿½ï¿½Îªï¿½Ëºï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ó³ï¿½ï¿½ï¿½È¥
 	i2d[0] = scale;  i2d[1] = 0;  i2d[2] = (-scale * image.cols + new_shape.width + scale - 1) * 0.5;
 	i2d[3] = 0;  i2d[4] = scale;  i2d[5] = (-scale * image.rows + new_shape.height + scale - 1) * 0.5;
 
@@ -180,7 +182,7 @@ void perf() {
 		std::cout << "\t BATCH1 time elapse: " << (double)(cv::getTickCount() - t) / cv::getTickFrequency() * 1000 << "ms." << endl;
 		//timer.stop("BATCH1");
 	}
-	}
+}
 
 void batch_inference() {
 	std::vector<cv::Mat> images{ cv::imread("../workspace/inference/car.jpg"), cv::imread("../workspace/inference/gril.jpg"),
@@ -215,16 +217,18 @@ void batch_inference() {
 
 void single_inference() {
 	cv::Mat image = cv::imread("../workspace/inference/car.jpg");
-	auto yolo = yolo::load("../workspace/yolov8n-seg.b1.transd.engine", yolo::Type::V8Seg);
+	//auto yolo = yolo::load("../workspace/yolov8n-seg.b1.transd.engine", yolo::Type::V8Seg);
+	shared_ptr<yolo_ort::Infer> yolo = yolo_ort::load("../workspace/yolov8n-seg.b1.transd.onnx", yolo_ort::Type::V8Seg);
 	if (yolo == nullptr) return;
 
-	auto objs = yolo->forward(cvimg(image));
+	//auto objs = yolo->forward(cvimg(image));
+	auto objs = yolo->forward(image);
 	int i = 0;
 	for (auto& obj : objs) {
 		uint8_t b, g, r;
 		tie(b, g, r) = yolo::random_color(obj.class_label);
-		cv::rectangle(image, cv::Point(obj.left, obj.top), cv::Point(obj.right, obj.bottom),
-			cv::Scalar(b, g, r), 5);
+		cv::Rect rect(cv::Point(obj.left, obj.top), cv::Point(obj.right, obj.bottom));
+		cv::rectangle(image, rect, cv::Scalar(b, g, r), 5);
 
 		auto name = cocolabels[obj.class_label];
 		auto caption = cv::format("%s %.2f", name, obj.confidence);
@@ -234,8 +238,11 @@ void single_inference() {
 		cv::putText(image, caption, cv::Point(obj.left, obj.top - 5), 0, 1, cv::Scalar::all(0), 2, 16);
 
 		if (obj.seg) {
-			cv::imwrite(cv::format("%d_mask.jpg", i),
-				cv::Mat(obj.seg->height, obj.seg->width, CV_8U, obj.seg->data));
+			cv::Mat mask(obj.seg->height, obj.seg->width, CV_8U, obj.seg->data);
+			cv::resize(mask, mask, rect.size(), cv::INTER_CUBIC);
+			cv::cvtColor(mask, mask, cv::COLOR_GRAY2BGR);
+			image(rect) = image(rect) * 0.5 + mask * 0.5;
+			//cv::imwrite(cv::format("%d_mask.jpg", i), mask);
 			i++;
 		}
 	}
@@ -245,10 +252,82 @@ void single_inference() {
 }
 
 namespace fs = std::filesystem;
-int main() {
+std::string keys =
+"{help  h					|							| Print help message. }"
+"{im_dir                    |./images                   | images fold         }"
+"{engine_file               |./data/low_bcm.model		| model file         }"
+"{conf_thresh               |0.1                		|          }"
+"{nms_thresh                |0.5                		|        }"
+;
+
+int main(int argc, char* argv[]) {
+	cv::CommandLineParser parser(argc, argv, keys);
+	if (parser.has("help")) {
+		parser.printMessage();
+	}
+	std::string im_dir = parser.get<std::string>("im_dir");
+	std::string engine_file = parser.get<std::string>("engine_file");
+	float conf_thresh = parser.get<float>("conf_thresh");
+	float nms_thresh = parser.get<float>("nms_thresh");
+
 	std::cout << "Current path is " << fs::current_path() << '\n';
-	perf();
-	batch_inference();
+	std::vector<std::string> image_files;
+	try {
+		cv::glob(im_dir + "\\*.jpg", image_files, true);
+	}
+	catch (cv::Exception& e) {
+		std::cerr << e.msg << endl;
+		return 0;
+	}
+	//perf();
+	//batch_inference();
 	//single_inference();
+	int64 t = cv::getTickCount();
+	auto yolo = yolo::load(engine_file, yolo::Type::V8Seg, conf_thresh, nms_thresh);
+	std::cout << "Loading Time: " << (cv::getTickCount() - t) * 1000 / cv::getTickFrequency() << "ms." << std::endl;
+	if (yolo == nullptr) return -1;
+
+	cv::namedWindow("original", cv::WINDOW_NORMAL);
+	cv::namedWindow("result", cv::WINDOW_NORMAL);
+	for (auto file : image_files) {
+		cv::Mat image = cv::imread(file);
+		if (image.empty())
+			continue;
+		fs::path filePath(file);
+		fs::path relativePath = filePath.lexically_relative(filePath.parent_path().parent_path());
+		std::cout << "\t" << relativePath << std::endl;
+
+		t = cv::getTickCount();
+		auto objs = yolo->forward(cvimg(image));
+		std::cout << "\t time elapse: " << (double)(cv::getTickCount() - t) / cv::getTickFrequency() * 1000 << "ms." << endl;
+		cv::Mat draw = image.clone();
+		for (auto& obj : objs) {
+			uint8_t b, g, r;
+			tie(b, g, r) = yolo::random_color(obj.class_label);
+			cv::Rect rect(cv::Point(obj.left, obj.top), cv::Point(obj.right, obj.bottom));
+			cv::rectangle(draw, rect, cv::Scalar(b, g, r), 5);
+
+			auto name = blood_dna_labels[obj.class_label];
+			auto caption = cv::format("%s %.2f", name, obj.confidence);
+			int width = cv::getTextSize(caption, 0, 1, 2, nullptr).width + 10;
+			cv::rectangle(draw, cv::Point(obj.left - 3, obj.top - 33),
+				cv::Point(obj.left + width, obj.top), cv::Scalar(b, g, r), -1);
+			cv::putText(draw, caption, cv::Point(obj.left, obj.top - 5), 0, 1, cv::Scalar::all(0), 2, 16);
+
+			if (obj.seg) {
+				cv::Mat mask(obj.seg->height, obj.seg->width, CV_8U, obj.seg->data);
+				cv::resize(mask, mask, rect.size(), cv::INTER_CUBIC);
+				cv::cvtColor(mask, mask, cv::COLOR_GRAY2BGR);
+				draw(rect) = draw(rect) * 0.5 + mask * 0.5;
+			}
+		}
+
+#ifndef _DEBUG
+		cv::imshow("original", image);
+		cv::imshow("result", draw);
+		cv::waitKey(0);
+#endif
+	}
+
 	return 0;
 }
